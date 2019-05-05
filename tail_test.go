@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hpcloud/tail/ratelimiter"
-	"github.com/hpcloud/tail/watch"
+	"github.com/gcla/tail/ratelimiter"
+	"github.com/gcla/tail/watch"
 )
 
 func init() {
@@ -102,8 +102,8 @@ func TestStopAtEOF(t *testing.T) {
 	tail := tailTest.StartTail("test.txt", Config{Follow: true, Location: nil})
 
 	// read "hello"
-	line := <-tail.Lines
-	if line.Text != "hello" {
+	line := <-tail.Bytes
+	if string(line.Text) != "hello" {
 		t.Errorf("Expected to get 'hello', got '%s' instead", line.Text)
 	}
 
@@ -112,33 +112,11 @@ func TestStopAtEOF(t *testing.T) {
 	tailTest.Cleanup(tail, true)
 }
 
-func TestMaxLineSizeFollow(t *testing.T) {
-	// As last file line does not end with newline, it will not be present in tail's output
-	maxLineSize(t, true, "hello\nworld\nfin\nhe", []string{"hel", "lo", "wor", "ld", "fin"})
-}
-
-func TestMaxLineSizeNoFollow(t *testing.T) {
-	maxLineSize(t, false, "hello\nworld\nfin\nhe", []string{"hel", "lo", "wor", "ld", "fin", "he"})
-}
-
 func TestOver4096ByteLine(t *testing.T) {
 	tailTest := NewTailTest("Over4096ByteLine", t)
 	testString := strings.Repeat("a", 4097)
 	tailTest.CreateFile("test.txt", "test\n"+testString+"\nhello\nworld\n")
 	tail := tailTest.StartTail("test.txt", Config{Follow: true, Location: nil})
-	go tailTest.VerifyTailOutput(tail, []string{"test", testString, "hello", "world"}, false)
-
-	// Delete after a reasonable delay, to give tail sufficient time
-	// to read all lines.
-	<-time.After(100 * time.Millisecond)
-	tailTest.RemoveFile("test.txt")
-	tailTest.Cleanup(tail, true)
-}
-func TestOver4096ByteLineWithSetMaxLineSize(t *testing.T) {
-	tailTest := NewTailTest("Over4096ByteLineMaxLineSize", t)
-	testString := strings.Repeat("a", 4097)
-	tailTest.CreateFile("test.txt", "test\n"+testString+"\nhello\nworld\n")
-	tail := tailTest.StartTail("test.txt", Config{Follow: true, Location: nil, MaxLineSize: 4097})
 	go tailTest.VerifyTailOutput(tail, []string{"test", testString, "hello", "world"}, false)
 
 	// Delete after a reasonable delay, to give tail sufficient time
@@ -266,7 +244,7 @@ func TestTell(t *testing.T) {
 		Location: &SeekInfo{0, os.SEEK_SET}}
 	tail := tailTest.StartTail("test.txt", config)
 	// read noe line
-	<-tail.Lines
+	<-tail.Bytes
 	offset, err := tail.Tell()
 	if err != nil {
 		tailTest.Errorf("Tell return error: %s", err.Error())
@@ -278,10 +256,10 @@ func TestTell(t *testing.T) {
 		Follow:   false,
 		Location: &SeekInfo{offset, os.SEEK_SET}}
 	tail = tailTest.StartTail("test.txt", config)
-	for l := range tail.Lines {
+	for l := range tail.Bytes {
 		// it may readed one line in the chan(tail.Lines),
 		// so it may lost one line.
-		if l.Text != "world" && l.Text != "again" {
+		if string(l.Text) != "world" && string(l.Text) != "again" {
 			tailTest.Fatalf("mismatch; expected world or again, but got %s",
 				l.Text)
 		}
@@ -302,8 +280,8 @@ func TestBlockUntilExists(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 		tailTest.CreateFile("test.txt", "hello world\n")
 	}()
-	for l := range tail.Lines {
-		if l.Text != "hello world" {
+	for l := range tail.Bytes {
+		if string(l.Text) != "hello world" {
 			tailTest.Fatalf("mismatch; expected hello world, but got %s",
 				l.Text)
 		}
@@ -312,19 +290,6 @@ func TestBlockUntilExists(t *testing.T) {
 	tailTest.RemoveFile("test.txt")
 	tail.Stop()
 	tail.Cleanup()
-}
-
-func maxLineSize(t *testing.T, follow bool, fileContent string, expected []string) {
-	tailTest := NewTailTest("maxlinesize", t)
-	tailTest.CreateFile("test.txt", fileContent)
-	tail := tailTest.StartTail("test.txt", Config{Follow: follow, Location: nil, MaxLineSize: 3})
-	go tailTest.VerifyTailOutput(tail, expected, false)
-
-	// Delete after a reasonable delay, to give tail sufficient time
-	// to read all lines.
-	<-time.After(100 * time.Millisecond)
-	tailTest.RemoveFile("test.txt")
-	tailTest.Cleanup(tail, true)
 }
 
 func reOpen(t *testing.T, poll bool) {
@@ -522,7 +487,7 @@ func (t TailTest) VerifyTailOutput(tail *Tail, lines []string, expectEOF bool) {
 	// It is important to do this if only EOF is expected
 	// otherwise we could block on <-tail.Lines
 	if expectEOF {
-		line, ok := <-tail.Lines
+		line, ok := <-tail.Bytes
 		if ok {
 			t.Fatalf("more content from tail: %+v", line)
 		}
@@ -531,7 +496,7 @@ func (t TailTest) VerifyTailOutput(tail *Tail, lines []string, expectEOF bool) {
 
 func (t TailTest) ReadLines(tail *Tail, lines []string) {
 	for idx, line := range lines {
-		tailedLine, ok := <-tail.Lines
+		tailedLine, ok := <-tail.Bytes
 		if !ok {
 			// tail.Lines is closed and empty.
 			err := tail.Err()
@@ -545,7 +510,7 @@ func (t TailTest) ReadLines(tail *Tail, lines []string) {
 		}
 		// Note: not checking .Err as the `lines` argument is designed
 		// to match error strings as well.
-		if tailedLine.Text != line {
+		if string(tailedLine.Text) != line {
 			t.Fatalf(
 				"unexpected line/err from tail: "+
 					"expecting <<%s>>>, but got <<<%s>>>",
