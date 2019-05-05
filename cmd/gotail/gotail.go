@@ -24,7 +24,6 @@ func args2config() (tail.Config, int64) {
 	if config.ReOpen {
 		config.Follow = true
 	}
-	config.MaxLineSize = maxlinesize
 	return config, n
 }
 
@@ -56,7 +55,7 @@ func tailFile(filename string, config tail.Config, done chan bool) {
 		fmt.Println(err)
 		return
 	}
-	for line := range t.Lines {
+	for line := range t.Bytes {
 		fmt.Println(line.Text)
 	}
 	err = t.Wait()
