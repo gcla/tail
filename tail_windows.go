@@ -3,7 +3,7 @@
 package tail
 
 import (
-	"github.com/gcla/tail/winfile"
+	"github.com/hpcloud/tail/winfile"
 	"os"
 )
 
